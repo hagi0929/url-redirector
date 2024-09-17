@@ -32,7 +32,7 @@ func loadRedirects(filePath string) error {
 }
 
 func redirectHandler(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path[1:] // Get the URL path without leading "/"
+	path := r.URL.Path[1:]
 
 	if dest, ok := redirects[path]; ok {
 		http.Redirect(w, r, dest, http.StatusMovedPermanently)
