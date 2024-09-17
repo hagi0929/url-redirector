@@ -7,10 +7,10 @@ import (
 
 // A map to hold the redirect URLs
 var redirects = map[string]string{
-	"github":    "https://github.com/hagi0929",
-	"portfolio": "https://jaehak.me",
-	"linkedin":  "https://www.linkedin.com/in/ha-gi/",
-	"linkedin":  "https://www.linkedin.com/feed/",
+	"github":       "https://github.com/hagi0929",
+	"portfolio":    "https://jaehak.me",
+	"linkedin":     "https://www.linkedin.com/in/ha-gi/",
+	"algowarriors": "https://www.linkedin.com/feed/",
 }
 
 func redirectHandler(w http.ResponseWriter, r *http.Request) {
