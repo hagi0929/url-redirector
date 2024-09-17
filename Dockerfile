@@ -2,7 +2,7 @@ FROM golang:1.20-alpine AS build
 
 WORKDIR /app
 
-COPY . .
+COPY main.go .
 
 RUN go build -o redirector main.go
 
