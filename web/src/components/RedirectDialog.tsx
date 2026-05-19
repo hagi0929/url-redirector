@@ -79,10 +79,15 @@ export function RedirectDialog({ mode, open, initial, onClose }: Props) {
     return Object.keys(e).length === 0;
   }
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function submit() {
+    if (mutation.isPending) return;
     if (!validate()) return;
     mutation.mutate();
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submit();
   }
 
   return (
@@ -101,8 +106,8 @@ export function RedirectDialog({ mode, open, initial, onClose }: Props) {
             Cancel
           </button>
           <button
-            form="redirect-form"
-            type="submit"
+            type="button"
+            onClick={submit}
             disabled={mutation.isPending}
             className="px-3 py-1.5 rounded-md text-sm bg-accent hover:bg-accent/90 text-white inline-flex items-center gap-2 disabled:opacity-60"
           >
