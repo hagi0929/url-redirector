@@ -3,6 +3,8 @@ export type Redirect = {
   target_url: string;
   status_code: number;
   hit_count: number;
+  favorite: boolean;
+  last_accessed?: string;
   created_at: string;
   updated_at: string;
 };
@@ -15,8 +17,35 @@ export type ListResponse = {
 export type Stats = {
   total_redirects: number;
   total_hits: number;
+  favorite_count: number;
+  hits_last_24h: number;
+  active_slugs_24h: number;
   top_slugs: Redirect[];
   recent: Redirect[];
+  favorites: Redirect[];
+};
+
+export type RedirectMetrics = {
+  slug: string;
+  last_accessed?: string;
+  daily_hits: Record<string, number>;
+  hourly_hits: Record<string, number>;
+  browsers: Record<string, number>;
+  oses: Record<string, number>;
+  referrers: Record<string, number>;
+};
+
+export type HitEvent = {
+  at: string;
+  slug: string;
+  target: string;
+  browser: string;
+  os: string;
+  referrer: string;
+};
+
+export type RecentHitsResponse = {
+  items: HitEvent[];
 };
 
 export type CreateInput = {
@@ -67,12 +96,19 @@ export const api = {
   list: () => request<ListResponse>("/api/redirects"),
   get: (slug: string) => request<Redirect>(`/api/redirects/${encodeURIComponent(slug)}`),
   stats: () => request<Stats>("/api/stats"),
+  metrics: (slug: string) => request<RedirectMetrics>(`/api/redirects/${encodeURIComponent(slug)}/metrics`),
+  recentHits: () => request<RecentHitsResponse>("/api/recent-hits"),
   create: (body: CreateInput) =>
     request<Redirect>("/api/redirects", { method: "POST", body: JSON.stringify(body) }),
   update: (slug: string, body: UpdateInput) =>
     request<Redirect>(`/api/redirects/${encodeURIComponent(slug)}`, {
       method: "PUT",
       body: JSON.stringify(body),
+    }),
+  setFavorite: (slug: string, favorite: boolean) =>
+    request<Redirect>(`/api/redirects/${encodeURIComponent(slug)}/favorite`, {
+      method: "PUT",
+      body: JSON.stringify({ favorite }),
     }),
   remove: (slug: string) =>
     request<void>(`/api/redirects/${encodeURIComponent(slug)}`, { method: "DELETE" }),

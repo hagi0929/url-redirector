@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hagi0929/url-redirector/internal/admin"
+	"github.com/hagi0929/url-redirector/internal/hits"
 	"github.com/hagi0929/url-redirector/internal/public"
 	"github.com/hagi0929/url-redirector/internal/storage"
 )
@@ -41,14 +42,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	hitBuffer := hits.New(500)
+
 	publicSrv := &http.Server{
 		Addr:              redirectAddr,
-		Handler:           public.NewHandler(store, fallbackURL),
+		Handler:           public.NewHandler(store, hitBuffer, fallbackURL),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	adminSrv := &http.Server{
 		Addr:              adminAddr,
-		Handler:           admin.NewHandler(store, dist),
+		Handler:           admin.NewHandler(store, hitBuffer, dist),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

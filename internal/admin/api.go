@@ -10,11 +10,12 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"github.com/hagi0929/url-redirector/internal/hits"
 	"github.com/hagi0929/url-redirector/internal/redirect"
 	"github.com/hagi0929/url-redirector/internal/storage"
 )
 
-func NewHandler(store *storage.Store, dashboardFS fs.FS) http.Handler {
+func NewHandler(store *storage.Store, buf *hits.Buffer, dashboardFS fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
 	config := huma.DefaultConfig("URL Redirector Admin API", "1.0.0")
@@ -25,6 +26,7 @@ func NewHandler(store *storage.Store, dashboardFS fs.FS) http.Handler {
 	api := humago.New(mux, config)
 	registerCRUDRoutes(api, store)
 	registerStatsRoute(api, store)
+	registerMetricsRoutes(api, store, buf)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

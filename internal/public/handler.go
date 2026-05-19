@@ -5,11 +5,15 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/hagi0929/url-redirector/internal/hits"
+	"github.com/hagi0929/url-redirector/internal/redirect"
 	"github.com/hagi0929/url-redirector/internal/storage"
+	"github.com/hagi0929/url-redirector/internal/useragent"
 )
 
-func NewHandler(store *storage.Store, fallbackURL string) http.Handler {
+func NewHandler(store *storage.Store, buf *hits.Buffer, fallbackURL string) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -42,11 +46,25 @@ func NewHandler(store *storage.Store, fallbackURL string) http.Handler {
 			return
 		}
 
-		go func(s string) {
-			if err := store.IncrementHit(s); err != nil {
-				slog.Warn("increment hit failed", "slug", s, "err", err)
+		ua := r.UserAgent()
+		browser, os := useragent.Parse(ua)
+		ev := redirect.HitEvent{
+			At:        time.Now().UTC(),
+			Slug:      slug,
+			Target:    red.TargetURL,
+			Browser:   browser,
+			OS:        os,
+			Referrer:  useragent.ParseReferrer(r.Referer()),
+			UserAgent: ua,
+		}
+		if buf != nil {
+			buf.Push(ev)
+		}
+		go func(e redirect.HitEvent) {
+			if err := store.RecordHit(e); err != nil {
+				slog.Warn("record hit failed", "slug", e.Slug, "err", err)
 			}
-		}(slug)
+		}(ev)
 
 		status := red.StatusCode
 		if status == 0 {

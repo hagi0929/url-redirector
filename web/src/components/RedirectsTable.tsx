@@ -1,26 +1,59 @@
 import { useMemo, useState } from "react";
-import { Copy, ExternalLink, Pencil, Trash2, ArrowUpDown, ArrowDown, ArrowUp, Search } from "lucide-react";
-import type { Redirect } from "../api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Copy,
+  ExternalLink,
+  Pencil,
+  Search,
+  Star,
+  Trash2,
+} from "lucide-react";
+import { api, ApiError, type Redirect } from "../api";
 import { formatNumber, formatRelative, originForRedirect, truncate } from "../lib/format";
 import { useToast } from "./Toast";
 
-type Sort = { key: "slug" | "hit_count" | "created_at" | "updated_at"; dir: "asc" | "desc" };
+type Sort = { key: "slug" | "hit_count" | "created_at" | "last_accessed"; dir: "asc" | "desc" };
 
 type Props = {
   items: Redirect[];
   loading: boolean;
+  filter: "all" | "favorites";
+  onFilterChange: (f: "all" | "favorites") => void;
+  onSelect: (r: Redirect) => void;
   onEdit: (r: Redirect) => void;
   onDelete: (r: Redirect) => void;
 };
 
-export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
+export function RedirectsTable({
+  items,
+  loading,
+  filter,
+  onFilterChange,
+  onSelect,
+  onEdit,
+  onDelete,
+}: Props) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<Sort>({ key: "hit_count", dir: "desc" });
   const toast = useToast();
+  const qc = useQueryClient();
+
+  const favMutation = useMutation({
+    mutationFn: ({ slug, favorite }: { slug: string; favorite: boolean }) => api.setFavorite(slug, favorite),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["redirects"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.detail || `Failed (${err.status})` : "Failed"),
+  });
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     let arr = items;
+    if (filter === "favorites") arr = arr.filter((r) => r.favorite);
     if (term) {
       arr = arr.filter(
         (r) => r.slug.toLowerCase().includes(term) || r.target_url.toLowerCase().includes(term),
@@ -29,13 +62,13 @@ export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
     const k = sort.key;
     const dir = sort.dir === "asc" ? 1 : -1;
     arr = [...arr].sort((a, b) => {
-      const av = a[k];
-      const bv = b[k];
+      const av = a[k] ?? "";
+      const bv = b[k] ?? "";
       if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
       return String(av).localeCompare(String(bv)) * dir;
     });
     return arr;
-  }, [items, q, sort]);
+  }, [items, q, sort, filter]);
 
   function toggleSort(key: Sort["key"]) {
     setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
@@ -52,7 +85,24 @@ export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
 
   return (
     <div className="rounded-xl border border-border bg-panel shadow-card overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 border-b border-border">
+        <div className="inline-flex items-center bg-panel2 border border-border rounded-md p-0.5 text-xs">
+          <button
+            onClick={() => onFilterChange("all")}
+            className={`px-2.5 py-1 rounded ${filter === "all" ? "bg-bg text-text" : "text-muted hover:text-text"}`}
+          >
+            All
+          </button>
+          <button
+            onClick={() => onFilterChange("favorites")}
+            className={`px-2.5 py-1 rounded inline-flex items-center gap-1 ${
+              filter === "favorites" ? "bg-bg text-warning" : "text-muted hover:text-text"
+            }`}
+          >
+            <Star size={12} fill={filter === "favorites" ? "currentColor" : "none"} />
+            Favorites
+          </button>
+        </div>
         <div className="relative flex-1 max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
@@ -62,7 +112,7 @@ export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
             className="w-full pl-8 pr-3 py-2 text-sm bg-panel2 border border-border rounded-md outline-none focus:border-accent"
           />
         </div>
-        <div className="text-xs text-muted">
+        <div className="text-xs text-muted ml-auto">
           {loading ? "Loading…" : `${filtered.length} of ${items.length}`}
         </div>
       </div>
@@ -70,6 +120,7 @@ export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
         <table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wider text-muted bg-panel2/40">
             <tr>
+              <th className="w-9 px-2 py-2.5"></th>
               <Th onClick={() => toggleSort("slug")} sorted={sort.key === "slug" ? sort.dir : undefined}>
                 Slug
               </Th>
@@ -77,6 +128,9 @@ export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
               <th className="px-4 py-2.5 text-left font-medium">Status</th>
               <Th onClick={() => toggleSort("hit_count")} sorted={sort.key === "hit_count" ? sort.dir : undefined} align="right">
                 Hits
+              </Th>
+              <Th onClick={() => toggleSort("last_accessed")} sorted={sort.key === "last_accessed" ? sort.dir : undefined}>
+                Last Hit
               </Th>
               <Th onClick={() => toggleSort("created_at")} sorted={sort.key === "created_at" ? sort.dir : undefined}>
                 Created
@@ -87,21 +141,40 @@ export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
           <tbody>
             {loading && items.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-muted">
+                <td colSpan={8} className="px-4 py-12 text-center text-muted">
                   Loading…
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-muted">
-                  {items.length === 0 ? "No redirects yet. Click ‘New' to create one." : "No matches."}
+                <td colSpan={8} className="px-4 py-12 text-center text-muted">
+                  {items.length === 0
+                    ? "No redirects yet. Click ‘New' to create one."
+                    : filter === "favorites"
+                      ? "No favorites yet. Star a redirect to add it here."
+                      : "No matches."}
                 </td>
               </tr>
             ) : (
               filtered.map((r) => (
-                <tr key={r.slug} className="border-t border-border/60 hover:bg-panel2/40 transition-colors">
+                <tr
+                  key={r.slug}
+                  onClick={() => onSelect(r)}
+                  className="border-t border-border/60 hover:bg-panel2/40 transition-colors cursor-pointer"
+                >
+                  <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => favMutation.mutate({ slug: r.slug, favorite: !r.favorite })}
+                      className={`p-1.5 rounded-md transition-colors ${
+                        r.favorite ? "text-warning hover:bg-warning/10" : "text-muted hover:text-warning hover:bg-panel2"
+                      }`}
+                      title={r.favorite ? "Unfavorite" : "Favorite"}
+                    >
+                      <Star size={14} fill={r.favorite ? "currentColor" : "none"} />
+                    </button>
+                  </td>
                   <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <span className="font-mono text-accent">/{r.slug}</span>
                       <IconBtn onClick={() => copy(originForRedirect(r.slug), "short URL")} title="Copy short URL">
                         <Copy size={13} />
@@ -109,9 +182,9 @@ export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-1.5 max-w-md">
+                    <div className="flex items-center gap-1.5 max-w-md" onClick={(e) => e.stopPropagation()}>
                       <span className="font-mono text-muted truncate" title={r.target_url}>
-                        {truncate(r.target_url, 70)}
+                        {truncate(r.target_url, 60)}
                       </span>
                       <IconBtn onClick={() => copy(r.target_url, "target URL")} title="Copy target URL">
                         <Copy size={13} />
@@ -124,10 +197,11 @@ export function RedirectsTable({ items, loading, onEdit, onDelete }: Props) {
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{formatNumber(r.hit_count)}</td>
+                  <td className="px-4 py-2.5 text-muted text-xs">{formatRelative(r.last_accessed)}</td>
                   <td className="px-4 py-2.5 text-muted text-xs" title={r.created_at}>
                     {formatRelative(r.created_at)}
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-1">
                       <IconBtn
                         as="a"

@@ -3,8 +3,9 @@ package storage
 import (
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"os"
+	"path/filepath"
+	"sort"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -17,7 +18,16 @@ var (
 	ErrAlreadyExists = errors.New("redirect already exists")
 )
 
-var bucketName = []byte("redirects")
+var (
+	redirectsBucket = []byte("redirects")
+	metricsBucket   = []byte("metrics")
+)
+
+const (
+	maxDailyBuckets    = 30
+	maxHourlyBuckets   = 48
+	maxReferrerEntries = 50
+)
 
 type Store struct {
 	db *bolt.DB
@@ -34,8 +44,13 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(bucketName)
-		return err
+		if _, err := tx.CreateBucketIfNotExists(redirectsBucket); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists(metricsBucket); err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -48,7 +63,7 @@ func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) Get(slug string) (redirect.Redirect, error) {
 	var r redirect.Redirect
 	err := s.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(bucketName).Get([]byte(slug))
+		v := tx.Bucket(redirectsBucket).Get([]byte(slug))
 		if v == nil {
 			return ErrNotFound
 		}
@@ -60,7 +75,7 @@ func (s *Store) Get(slug string) (redirect.Redirect, error) {
 func (s *Store) List() ([]redirect.Redirect, error) {
 	out := []redirect.Redirect{}
 	err := s.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketName).ForEach(func(_, v []byte) error {
+		return tx.Bucket(redirectsBucket).ForEach(func(_, v []byte) error {
 			var r redirect.Redirect
 			if err := json.Unmarshal(v, &r); err != nil {
 				return err
@@ -77,8 +92,9 @@ func (s *Store) Create(r redirect.Redirect) (redirect.Redirect, error) {
 	r.CreatedAt = now
 	r.UpdatedAt = now
 	r.HitCount = 0
+	r.LastAccessed = time.Time{}
 	err := s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
+		b := tx.Bucket(redirectsBucket)
 		if b.Get([]byte(r.Slug)) != nil {
 			return ErrAlreadyExists
 		}
@@ -94,7 +110,7 @@ func (s *Store) Create(r redirect.Redirect) (redirect.Redirect, error) {
 func (s *Store) Update(slug, target string, status int) (redirect.Redirect, error) {
 	var r redirect.Redirect
 	err := s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
+		b := tx.Bucket(redirectsBucket)
 		v := b.Get([]byte(slug))
 		if v == nil {
 			return ErrNotFound
@@ -118,32 +134,158 @@ func (s *Store) Update(slug, target string, status int) (redirect.Redirect, erro
 	return r, err
 }
 
-func (s *Store) Delete(slug string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
-		if b.Get([]byte(slug)) == nil {
-			return ErrNotFound
-		}
-		return b.Delete([]byte(slug))
-	})
-}
-
-func (s *Store) IncrementHit(slug string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
+func (s *Store) SetFavorite(slug string, favorite bool) (redirect.Redirect, error) {
+	var r redirect.Redirect
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(redirectsBucket)
 		v := b.Get([]byte(slug))
 		if v == nil {
 			return ErrNotFound
 		}
-		var r redirect.Redirect
 		if err := json.Unmarshal(v, &r); err != nil {
 			return err
 		}
-		r.HitCount++
+		r.Favorite = favorite
+		r.UpdatedAt = time.Now().UTC()
 		data, err := json.Marshal(r)
 		if err != nil {
 			return err
 		}
 		return b.Put([]byte(slug), data)
 	})
+	return r, err
+}
+
+func (s *Store) Delete(slug string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(redirectsBucket)
+		if b.Get([]byte(slug)) == nil {
+			return ErrNotFound
+		}
+		if err := b.Delete([]byte(slug)); err != nil {
+			return err
+		}
+		return tx.Bucket(metricsBucket).Delete([]byte(slug))
+	})
+}
+
+func (s *Store) RecordHit(ev redirect.HitEvent) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		rb := tx.Bucket(redirectsBucket)
+		key := []byte(ev.Slug)
+		rv := rb.Get(key)
+		if rv == nil {
+			return ErrNotFound
+		}
+		var r redirect.Redirect
+		if err := json.Unmarshal(rv, &r); err != nil {
+			return err
+		}
+		r.HitCount++
+		r.LastAccessed = ev.At
+		rdata, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		if err := rb.Put(key, rdata); err != nil {
+			return err
+		}
+
+		mb := tx.Bucket(metricsBucket)
+		mv := mb.Get(key)
+		var m redirect.Metrics
+		if mv == nil {
+			m = redirect.NewMetrics(ev.Slug)
+		} else if err := json.Unmarshal(mv, &m); err != nil {
+			return err
+		}
+		applyHit(&m, ev)
+		mdata, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return mb.Put(key, mdata)
+	})
+}
+
+func (s *Store) Metrics(slug string) (redirect.Metrics, error) {
+	m := redirect.NewMetrics(slug)
+	err := s.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(metricsBucket).Get([]byte(slug))
+		if v == nil {
+			if r := tx.Bucket(redirectsBucket).Get([]byte(slug)); r == nil {
+				return ErrNotFound
+			}
+			return nil
+		}
+		return json.Unmarshal(v, &m)
+	})
+	return m, err
+}
+
+func applyHit(m *redirect.Metrics, ev redirect.HitEvent) {
+	if m.DailyHits == nil {
+		m.DailyHits = map[string]int64{}
+	}
+	if m.HourlyHits == nil {
+		m.HourlyHits = map[string]int64{}
+	}
+	if m.Browsers == nil {
+		m.Browsers = map[string]int64{}
+	}
+	if m.OSes == nil {
+		m.OSes = map[string]int64{}
+	}
+	if m.Referrers == nil {
+		m.Referrers = map[string]int64{}
+	}
+	m.LastAccessed = ev.At
+	day := ev.At.UTC().Format("2006-01-02")
+	hour := ev.At.UTC().Format("2006-01-02T15")
+	m.DailyHits[day]++
+	m.HourlyHits[hour]++
+	if ev.Browser != "" {
+		m.Browsers[ev.Browser]++
+	}
+	if ev.OS != "" {
+		m.OSes[ev.OS]++
+	}
+	if ev.Referrer != "" {
+		m.Referrers[ev.Referrer]++
+	}
+	pruneOldestKey(m.DailyHits, maxDailyBuckets)
+	pruneOldestKey(m.HourlyHits, maxHourlyBuckets)
+	pruneTopN(m.Referrers, maxReferrerEntries)
+}
+
+func pruneOldestKey(m map[string]int64, keep int) {
+	if len(m) <= keep {
+		return
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for i := 0; i < len(keys)-keep; i++ {
+		delete(m, keys[i])
+	}
+}
+
+func pruneTopN(m map[string]int64, keep int) {
+	if len(m) <= keep {
+		return
+	}
+	type kv struct {
+		k string
+		v int64
+	}
+	arr := make([]kv, 0, len(m))
+	for k, v := range m {
+		arr = append(arr, kv{k, v})
+	}
+	sort.Slice(arr, func(i, j int) bool { return arr[i].v > arr[j].v })
+	for i := keep; i < len(arr); i++ {
+		delete(m, arr[i].k)
+	}
 }
