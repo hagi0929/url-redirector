@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +16,9 @@ import (
 	"github.com/hagi0929/url-redirector/internal/public"
 	"github.com/hagi0929/url-redirector/internal/storage"
 )
+
+//go:embed all:web/dist
+var dashboardFS embed.FS
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -30,6 +35,12 @@ func main() {
 	}
 	defer func() { _ = store.Close() }()
 
+	dist, err := fs.Sub(dashboardFS, "web/dist")
+	if err != nil {
+		slog.Error("dashboard fs init failed", "err", err)
+		os.Exit(1)
+	}
+
 	publicSrv := &http.Server{
 		Addr:              redirectAddr,
 		Handler:           public.NewHandler(store, fallbackURL),
@@ -37,7 +48,7 @@ func main() {
 	}
 	adminSrv := &http.Server{
 		Addr:              adminAddr,
-		Handler:           admin.NewHandler(store),
+		Handler:           admin.NewHandler(store, dist),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -13,23 +14,24 @@ import (
 	"github.com/hagi0929/url-redirector/internal/storage"
 )
 
-func NewHandler(store *storage.Store) http.Handler {
+func NewHandler(store *storage.Store, dashboardFS fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
 	config := huma.DefaultConfig("URL Redirector Admin API", "1.0.0")
 	config.Info.Description = "Manage URL redirects served by the public redirect endpoint."
+	config.DocsPath = "/docs"
 	config.DocsRenderer = huma.DocsRendererScalar
 
 	api := humago.New(mux, config)
-	registerRoutes(api, store)
+	registerCRUDRoutes(api, store)
+	registerStatsRoute(api, store)
 
-	mux.HandleFunc("GET /api", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/docs", http.StatusFound)
-	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	mux.Handle("GET /", newDashboardHandler(dashboardFS))
 	return mux
 }
 
@@ -64,7 +66,7 @@ type updateInput struct {
 	}
 }
 
-func registerRoutes(api huma.API, store *storage.Store) {
+func registerCRUDRoutes(api huma.API, store *storage.Store) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-redirects",
 		Method:      http.MethodGet,
