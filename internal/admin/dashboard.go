@@ -34,24 +34,34 @@ npm run build</code></pre>
 
 func newDashboardHandler(distFS fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(distFS))
-	hasIndex := false
-	if f, err := distFS.Open("index.html"); err == nil {
-		_ = f.Close()
-		hasIndex = true
-	}
+	indexBytes, indexErr := fs.ReadFile(distFS, "index.html")
+	hasIndex := indexErr == nil
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if path == "/" || path == "" {
-			if !hasIndex {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				_, _ = w.Write([]byte(stubHTML))
-				return
-			}
+		if !hasIndex {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(stubHTML))
+			return
 		}
 		if strings.HasPrefix(path, "/assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			fileServer.ServeHTTP(w, r)
+			return
 		}
-		fileServer.ServeHTTP(w, r)
+		// Anything that looks like a static file (has an extension) and exists in
+		// dist — serve directly. Otherwise fall back to index.html so React Router
+		// handles client-side routes (/stats, etc) without a 404 on refresh.
+		clean := strings.TrimPrefix(path, "/")
+		if clean != "" && strings.Contains(clean, ".") {
+			if f, err := distFS.Open(clean); err == nil {
+				_ = f.Close()
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(indexBytes)
 	})
 }
