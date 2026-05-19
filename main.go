@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hagi0929/url-redirector/internal/admin"
+	"github.com/hagi0929/url-redirector/internal/geo"
 	"github.com/hagi0929/url-redirector/internal/hits"
 	"github.com/hagi0929/url-redirector/internal/public"
 	"github.com/hagi0929/url-redirector/internal/storage"
@@ -36,6 +37,9 @@ func main() {
 	}
 	defer func() { _ = store.Close() }()
 
+	geoLookup := geo.Open(envOr("GEOIP_DB", "/data/dbip-country-lite.mmdb"))
+	defer geoLookup.Close()
+
 	dist, err := fs.Sub(dashboardFS, "web/dist")
 	if err != nil {
 		slog.Error("dashboard fs init failed", "err", err)
@@ -44,14 +48,19 @@ func main() {
 
 	hitBuffer := hits.New(500)
 
+	pruneCtx, stopPruner := context.WithCancel(context.Background())
+	defer stopPruner()
+	go runHitLogPruner(pruneCtx, store)
+
 	publicSrv := &http.Server{
 		Addr:              redirectAddr,
-		Handler:           public.NewHandler(store, hitBuffer, fallbackURL),
+		Handler:           public.NewHandler(store, hitBuffer, geoLookup, fallbackURL),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	publicBaseURL := os.Getenv("PUBLIC_BASE_URL")
 	adminSrv := &http.Server{
 		Addr:              adminAddr,
-		Handler:           admin.NewHandler(store, hitBuffer, dist),
+		Handler:           admin.NewHandler(store, hitBuffer, dist, publicBaseURL),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -82,4 +91,28 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func runHitLogPruner(ctx context.Context, store *storage.Store) {
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	prune := func() {
+		removed, err := store.PruneHitLog(storage.HitLogRetention)
+		if err != nil {
+			slog.Warn("hit log prune failed", "err", err)
+			return
+		}
+		if removed > 0 {
+			slog.Info("hit log pruned", "removed", removed)
+		}
+	}
+	prune()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			prune()
+		}
+	}
 }

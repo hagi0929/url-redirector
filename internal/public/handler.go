@@ -3,17 +3,19 @@ package public
 import (
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/hagi0929/url-redirector/internal/geo"
 	"github.com/hagi0929/url-redirector/internal/hits"
 	"github.com/hagi0929/url-redirector/internal/redirect"
 	"github.com/hagi0929/url-redirector/internal/storage"
 	"github.com/hagi0929/url-redirector/internal/useragent"
 )
 
-func NewHandler(store *storage.Store, buf *hits.Buffer, fallbackURL string) http.Handler {
+func NewHandler(store *storage.Store, buf *hits.Buffer, geoLookup *geo.Lookup, fallbackURL string) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -48,14 +50,19 @@ func NewHandler(store *storage.Store, buf *hits.Buffer, fallbackURL string) http
 
 		ua := r.UserAgent()
 		browser, os := useragent.Parse(ua)
+		ip := clientIP(r)
+		code, name := geoLookup.Country(ip)
 		ev := redirect.HitEvent{
-			At:        time.Now().UTC(),
-			Slug:      slug,
-			Target:    red.TargetURL,
-			Browser:   browser,
-			OS:        os,
-			Referrer:  useragent.ParseReferrer(r.Referer()),
-			UserAgent: ua,
+			At:          time.Now().UTC(),
+			Slug:        slug,
+			Target:      red.TargetURL,
+			Browser:     browser,
+			OS:          os,
+			Referrer:    useragent.ParseReferrer(r.Referer()),
+			IP:          ip,
+			CountryCode: code,
+			CountryName: name,
+			UserAgent:   ua,
 		}
 		if buf != nil {
 			buf.Push(ev)
@@ -74,4 +81,21 @@ func NewHandler(store *storage.Store, buf *hits.Buffer, fallbackURL string) http
 	})
 
 	return mux
+}
+
+func clientIP(r *http.Request) string {
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		if i := strings.IndexByte(v, ','); i >= 0 {
+			v = v[:i]
+		}
+		return strings.TrimSpace(v)
+	}
+	if v := r.Header.Get("X-Real-Ip"); v != "" {
+		return strings.TrimSpace(v)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

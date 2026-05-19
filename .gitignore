@@ -4,6 +4,8 @@ data/
 *.test
 *.out
 *.db
+*.mmdb
+*.mmdb.gz
 .idea/
 .vscode/
 web/node_modules

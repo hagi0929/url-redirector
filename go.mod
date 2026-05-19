@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/danielgtaylor/huma/v2 v2.38.0
+	github.com/oschwald/maxminddb-golang v1.13.1
 	go.etcd.io/bbolt v1.4.3
 )
 

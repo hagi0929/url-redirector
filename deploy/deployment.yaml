@@ -26,6 +26,9 @@ spec:
         - name: redirector
           image: ghcr.io/hagi0929/url-redirector:sha-6be4010
           imagePullPolicy: IfNotPresent
+          env:
+            - name: PUBLIC_BASE_URL
+              value: "http://redirect"
           ports:
             - { name: public, containerPort: 8080 }
             - { name: admin,  containerPort: 8081 }

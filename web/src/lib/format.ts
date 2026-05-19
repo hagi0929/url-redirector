@@ -32,8 +32,8 @@ export function truncate(s: string, max = 60): string {
   return s.slice(0, max - 1) + "…";
 }
 
-export function originForRedirect(slug: string): string {
-  const o = window.location.origin;
+export function originForRedirect(slug: string, baseURL?: string): string {
+  const o = baseURL && baseURL.length > 0 ? baseURL.replace(/\/$/, "") : window.location.origin;
   return `${o}/${slug}`;
 }
 

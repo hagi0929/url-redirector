@@ -1,34 +1,29 @@
 [tools]
 go = "1.25.10"
+node = "22"
 
 [env]
 HOST_PORT = "8080"
 ADMIN_HOST_PORT = "8081"
 DB_PATH = "./data/redirects.db"
+GEOIP_DB = "./data/dbip-country-lite.mmdb"
+PUBLIC_BASE_URL = "http://localhost:8080"
+
+# --- user-facing tasks ---
 
 [tasks.run]
-description = "Run the redirector locally"
+description = "Run the redirector locally (auto-builds dashboard)"
+depends = ["_web-build"]
 run = "go run ."
 
 [tasks.build]
-description = "Build the redirector binary into ./bin"
+description = "Build the redirector binary into ./bin (auto-builds dashboard)"
+depends = ["_web-build"]
 run = "go build -trimpath -ldflags='-s -w' -o bin/redirector ."
 
-[tasks.tidy]
-description = "Tidy go modules"
-run = "go mod tidy"
-
-[tasks.vet]
-description = "Run go vet"
-run = "go vet ./..."
-
 [tasks.test]
-description = "Run tests"
+description = "Run Go tests"
 run = "go test ./..."
-
-[tasks.fmt]
-description = "Format Go sources"
-run = "gofmt -w ."
 
 [tasks.up]
 description = "Start docker compose stack"
@@ -41,3 +36,20 @@ run = "docker compose down"
 [tasks.logs]
 description = "Tail compose logs"
 run = "docker compose logs -f"
+
+# --- internal helpers (hidden from `mise tasks`) ---
+
+[tasks._web-install]
+hide = true
+dir = "web"
+run = "npm ci --no-audit --no-fund"
+sources = ["package.json", "package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+
+[tasks._web-build]
+hide = true
+depends = ["_web-install"]
+dir = "web"
+run = "npm run build"
+sources = ["src/**/*", "index.html", "package.json", "vite.config.ts", "tsconfig.json", "tailwind.config.js", "postcss.config.js"]
+outputs = ["dist/index.html"]

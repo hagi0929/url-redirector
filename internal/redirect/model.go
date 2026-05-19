@@ -14,13 +14,16 @@ type Redirect struct {
 }
 
 type HitEvent struct {
-	At        time.Time `json:"at"`
-	Slug      string    `json:"slug"`
-	Target    string    `json:"target"`
-	Browser   string    `json:"browser"`
-	OS        string    `json:"os"`
-	Referrer  string    `json:"referrer"`
-	UserAgent string    `json:"-"`
+	At          time.Time `json:"at"`
+	Slug        string    `json:"slug"`
+	Target      string    `json:"target"`
+	Browser     string    `json:"browser"`
+	OS          string    `json:"os"`
+	Referrer    string    `json:"referrer"`
+	IP          string    `json:"ip,omitempty"`
+	CountryCode string    `json:"country_code,omitempty"`
+	CountryName string    `json:"country_name,omitempty"`
+	UserAgent   string    `json:"-"`
 }
 
 type Metrics struct {
@@ -31,6 +34,7 @@ type Metrics struct {
 	Browsers     map[string]int64 `json:"browsers"`
 	OSes         map[string]int64 `json:"oses"`
 	Referrers    map[string]int64 `json:"referrers"`
+	Countries    map[string]int64 `json:"countries"`
 }
 
 func NewMetrics(slug string) Metrics {
@@ -41,5 +45,6 @@ func NewMetrics(slug string) Metrics {
 		Browsers:   map[string]int64{},
 		OSes:       map[string]int64{},
 		Referrers:  map[string]int64{},
+		Countries:  map[string]int64{},
 	}
 }

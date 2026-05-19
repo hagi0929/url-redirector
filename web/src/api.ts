@@ -33,6 +33,7 @@ export type RedirectMetrics = {
   browsers: Record<string, number>;
   oses: Record<string, number>;
   referrers: Record<string, number>;
+  countries: Record<string, number>;
 };
 
 export type HitEvent = {
@@ -42,6 +43,31 @@ export type HitEvent = {
   browser: string;
   os: string;
   referrer: string;
+  ip?: string;
+  country_code?: string;
+  country_name?: string;
+};
+
+export type HitLogQuery = {
+  slug?: string;
+  country?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+};
+
+export type HitLogResponse = {
+  items: HitEvent[];
+  total: number;
+};
+
+export type GeoAggregate = {
+  counts: Record<string, number>;
+  total: number;
+};
+
+export type DashboardConfig = {
+  public_base_url: string;
 };
 
 export type RecentHitsResponse = {
@@ -93,6 +119,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  config: () => request<DashboardConfig>("/api/config"),
   list: () => request<ListResponse>("/api/redirects"),
   get: (slug: string) => request<Redirect>(`/api/redirects/${encodeURIComponent(slug)}`),
   stats: () => request<Stats>("/api/stats"),
@@ -112,6 +139,29 @@ export const api = {
     }),
   remove: (slug: string) =>
     request<void>(`/api/redirects/${encodeURIComponent(slug)}`, { method: "DELETE" }),
+  rename: (slug: string, newSlug: string) =>
+    request<Redirect>(`/api/redirects/${encodeURIComponent(slug)}/rename`, {
+      method: "POST",
+      body: JSON.stringify({ new_slug: newSlug }),
+    }),
+  hits: (q: HitLogQuery = {}) => {
+    const p = new URLSearchParams();
+    if (q.slug) p.set("slug", q.slug);
+    if (q.country) p.set("country", q.country);
+    if (q.since) p.set("since", q.since);
+    if (q.until) p.set("until", q.until);
+    if (q.limit) p.set("limit", String(q.limit));
+    const qs = p.toString();
+    return request<HitLogResponse>(`/api/hits${qs ? `?${qs}` : ""}`);
+  },
+  geo: (q: Omit<HitLogQuery, "country" | "limit"> = {}) => {
+    const p = new URLSearchParams();
+    if (q.slug) p.set("slug", q.slug);
+    if (q.since) p.set("since", q.since);
+    if (q.until) p.set("until", q.until);
+    const qs = p.toString();
+    return request<GeoAggregate>(`/api/hits/geo${qs ? `?${qs}` : ""}`);
+  },
 };
 
 export { ApiError };

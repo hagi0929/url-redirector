@@ -15,7 +15,7 @@ import (
 	"github.com/hagi0929/url-redirector/internal/storage"
 )
 
-func NewHandler(store *storage.Store, buf *hits.Buffer, dashboardFS fs.FS) http.Handler {
+func NewHandler(store *storage.Store, buf *hits.Buffer, dashboardFS fs.FS, publicBaseURL string) http.Handler {
 	mux := http.NewServeMux()
 
 	config := huma.DefaultConfig("URL Redirector Admin API", "1.0.0")
@@ -27,6 +27,8 @@ func NewHandler(store *storage.Store, buf *hits.Buffer, dashboardFS fs.FS) http.
 	registerCRUDRoutes(api, store)
 	registerStatsRoute(api, store)
 	registerMetricsRoutes(api, store, buf)
+	registerHitLogRoutes(api, store)
+	registerConfigRoute(api, publicBaseURL)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -165,5 +167,30 @@ func registerCRUDRoutes(api huma.API, store *storage.Store) {
 			return nil, huma.Error500InternalServerError("failed to delete redirect", err)
 		}
 		return nil, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "rename-redirect",
+		Method:      http.MethodPost,
+		Path:        "/api/redirects/{slug}/rename",
+		Summary:     "Change a redirect's slug, preserving hit count and metrics",
+		Tags:        []string{"redirects"},
+	}, func(_ context.Context, in *struct {
+		Slug string `path:"slug" doc:"Current slug" example:"gh"`
+		Body struct {
+			NewSlug string `json:"new_slug" minLength:"1" maxLength:"128" pattern:"^[a-zA-Z0-9][a-zA-Z0-9_-]*$" doc:"New slug" example:"github"`
+		}
+	}) (*redirectOutput, error) {
+		r, err := store.Rename(in.Slug, in.Body.NewSlug)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				return nil, huma.Error404NotFound(fmt.Sprintf("slug %q not found", in.Slug))
+			}
+			if errors.Is(err, storage.ErrAlreadyExists) {
+				return nil, huma.Error409Conflict(fmt.Sprintf("slug %q already exists", in.Body.NewSlug))
+			}
+			return nil, huma.Error500InternalServerError("failed to rename redirect", err)
+		}
+		return &redirectOutput{Body: r}, nil
 	})
 }

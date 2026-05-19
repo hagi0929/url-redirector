@@ -50,6 +50,9 @@ func Open(path string) (*Store, error) {
 		if _, err := tx.CreateBucketIfNotExists(metricsBucket); err != nil {
 			return err
 		}
+		if _, err := tx.CreateBucketIfNotExists(hitLogBucket); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		_ = db.Close()
@@ -204,8 +207,63 @@ func (s *Store) RecordHit(ev redirect.HitEvent) error {
 		if err != nil {
 			return err
 		}
-		return mb.Put(key, mdata)
+		if err := mb.Put(key, mdata); err != nil {
+			return err
+		}
+		return s.appendHitLog(tx, ev)
 	})
+}
+
+func (s *Store) Rename(oldSlug, newSlug string) (redirect.Redirect, error) {
+	var r redirect.Redirect
+	if oldSlug == newSlug {
+		return s.Get(oldSlug)
+	}
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		rb := tx.Bucket(redirectsBucket)
+		v := rb.Get([]byte(oldSlug))
+		if v == nil {
+			return ErrNotFound
+		}
+		if rb.Get([]byte(newSlug)) != nil {
+			return ErrAlreadyExists
+		}
+		if err := json.Unmarshal(v, &r); err != nil {
+			return err
+		}
+		r.Slug = newSlug
+		r.UpdatedAt = time.Now().UTC()
+		data, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		if err := rb.Put([]byte(newSlug), data); err != nil {
+			return err
+		}
+		if err := rb.Delete([]byte(oldSlug)); err != nil {
+			return err
+		}
+		mb := tx.Bucket(metricsBucket)
+		if mv := mb.Get([]byte(oldSlug)); mv != nil {
+			var m redirect.Metrics
+			if err := json.Unmarshal(mv, &m); err != nil {
+				return err
+			}
+			m.Slug = newSlug
+			md, err := json.Marshal(m)
+			if err != nil {
+				return err
+			}
+			if err := mb.Put([]byte(newSlug), md); err != nil {
+				return err
+			}
+			if err := mb.Delete([]byte(oldSlug)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return r, err
 }
 
 func (s *Store) Metrics(slug string) (redirect.Metrics, error) {
@@ -239,6 +297,9 @@ func applyHit(m *redirect.Metrics, ev redirect.HitEvent) {
 	if m.Referrers == nil {
 		m.Referrers = map[string]int64{}
 	}
+	if m.Countries == nil {
+		m.Countries = map[string]int64{}
+	}
 	m.LastAccessed = ev.At
 	day := ev.At.UTC().Format("2006-01-02")
 	hour := ev.At.UTC().Format("2006-01-02T15")
@@ -252,6 +313,9 @@ func applyHit(m *redirect.Metrics, ev redirect.HitEvent) {
 	}
 	if ev.Referrer != "" {
 		m.Referrers[ev.Referrer]++
+	}
+	if ev.CountryCode != "" {
+		m.Countries[ev.CountryCode]++
 	}
 	pruneOldestKey(m.DailyHits, maxDailyBuckets)
 	pruneOldestKey(m.HourlyHits, maxHourlyBuckets)
