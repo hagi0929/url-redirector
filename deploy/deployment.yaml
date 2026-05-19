@@ -24,7 +24,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: redirector
-          image: ghcr.io/hagi0929/url-redirector:sha-5a4d82d
+          image: ghcr.io/hagi0929/url-redirector:sha-2282836
           imagePullPolicy: IfNotPresent
           ports:
             - { name: public, containerPort: 8080 }
