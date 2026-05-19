@@ -1,0 +1,43 @@
+[tools]
+go = "1.25.10"
+
+[env]
+HOST_PORT = "8080"
+ADMIN_HOST_PORT = "8081"
+DB_PATH = "./data/redirects.db"
+
+[tasks.run]
+description = "Run the redirector locally"
+run = "go run ."
+
+[tasks.build]
+description = "Build the redirector binary into ./bin"
+run = "go build -trimpath -ldflags='-s -w' -o bin/redirector ."
+
+[tasks.tidy]
+description = "Tidy go modules"
+run = "go mod tidy"
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."
+
+[tasks.fmt]
+description = "Format Go sources"
+run = "gofmt -w ."
+
+[tasks.up]
+description = "Start docker compose stack"
+run = "docker compose up --build -d"
+
+[tasks.down]
+description = "Stop docker compose stack"
+run = "docker compose down"
+
+[tasks.logs]
+description = "Tail compose logs"
+run = "docker compose logs -f"
