@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - 'deploy/**'
       - '**.md'
   workflow_dispatch:
 
@@ -13,11 +12,11 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
 jobs:
-  build-and-bump:
+  build-and-push:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/${{ github.repository }}
@@ -49,25 +48,3 @@ jobs:
             ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Bump image tag in deploy/deployment.yaml
-        env:
-          TAG: ${{ steps.tag.outputs.value }}
-        run: |
-          sed -i "s|image: ${IMAGE}:.*|image: ${IMAGE}:${TAG}|" deploy/deployment.yaml
-          echo "--- deployment.yaml image line ---"
-          grep 'image:' deploy/deployment.yaml
-
-      - name: Commit and push tag bump
-        env:
-          TAG: ${{ steps.tag.outputs.value }}
-        run: |
-          if git diff --quiet deploy/deployment.yaml; then
-            echo "image tag unchanged; nothing to commit"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deploy/deployment.yaml
-          git commit -m "ci: bump image to ${TAG}"
-          git push
